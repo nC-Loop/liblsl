@@ -91,8 +91,8 @@
 #pragma once
 
 // endian and fpclassify
+#include <boost/assert.hpp>
 #include <boost/endian/conversion.hpp>
-
 // generic type traits for numeric types
 #include "portable_archive_exception.hpp"
 #include <cmath>

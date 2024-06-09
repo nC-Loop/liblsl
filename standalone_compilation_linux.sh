@@ -4,7 +4,7 @@
 # and no recent CMake version, i.e. ARM boards and PCs with old distributions.
 # For development, install a recent CMake version, either via pip
 # (pip install cmake) or as binary download from cmake.org
-
+CFLAGS="$CFLAGS -Wno-psabi"
 set -e -x
 # Try to read LSLGITREVISION from git if the variable isn't set
 echo ${LSLGITREVISION:="$(git describe --tags HEAD)"}

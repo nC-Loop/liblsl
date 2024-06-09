@@ -1,9 +1,9 @@
 #include <algorithm>
 #define BOOST_MATH_DISABLE_STD_FPCLASSIFY
-#include "sample.h"
 #include "common.h"
 #include "portable_archive/portable_iarchive.hpp"
 #include "portable_archive/portable_oarchive.hpp"
+#include "sample.h"
 #include "util/cast.hpp"
 #include <boost/endian/conversion.hpp>
 
@@ -257,7 +257,7 @@ void sample::load_streambuf(
 			}
 			// read string contents
 			str.resize(len);
-			if (len > 0) load_raw(sb, (void*) str.data(), len);
+			if (len > 0) load_raw(sb, (void *)str.data(), len);
 		}
 	} else {
 		// read numeric channel data
@@ -301,26 +301,26 @@ void lsl::sample::convert_endian(void *data, uint32_t n, uint32_t width) {
 template <class Archive> void sample::serialize_channels(Archive &ar, const uint32_t /*unused*/) {
 	switch (format_) {
 	case cft_float32:
-		for (auto &val : samplevals<float>(*this)) ar &val;
+		for (auto &val : samplevals<float>(*this)) ar & val;
 		break;
 	case cft_double64:
-		for (auto &val : samplevals<double>(*this)) ar &val;
+		for (auto &val : samplevals<double>(*this)) ar & val;
 		break;
 	case cft_string:
-		for (auto &val : samplevals<std::string>(*this)) ar &val;
+		for (auto &val : samplevals<std::string>(*this)) ar & val;
 		break;
 	case cft_int8:
-		for (auto &val : samplevals<int8_t>(*this)) ar &val;
+		for (auto &val : samplevals<int8_t>(*this)) ar & val;
 		break;
 	case cft_int16:
-		for (auto &val : samplevals<int16_t>(*this)) ar &val;
+		for (auto &val : samplevals<int16_t>(*this)) ar & val;
 		break;
 	case cft_int32:
-		for (auto &val : samplevals<int32_t>(*this)) ar &val;
+		for (auto &val : samplevals<int32_t>(*this)) ar & val;
 		break;
 #ifndef BOOST_NO_INT64_T
 	case cft_int64:
-		for (auto &val : samplevals<int64_t>(*this)) ar &val;
+		for (auto &val : samplevals<int64_t>(*this)) ar & val;
 		break;
 #endif
 	default: throw std::runtime_error("Unsupported channel format.");
@@ -330,9 +330,9 @@ template <class Archive> void sample::serialize_channels(Archive &ar, const uint
 void lsl::sample::serialize(eos::portable_oarchive &ar, const uint32_t archive_version) const {
 	// write sample header
 	if (timestamp_ == DEDUCED_TIMESTAMP) {
-		ar &TAG_DEDUCED_TIMESTAMP;
+		ar & TAG_DEDUCED_TIMESTAMP;
 	} else {
-		ar &TAG_TRANSMITTED_TIMESTAMP &timestamp_;
+		ar & TAG_TRANSMITTED_TIMESTAMP & timestamp_;
 	}
 	// write channel data
 	const_cast<sample *>(this)->serialize_channels(ar, archive_version);
@@ -341,13 +341,13 @@ void lsl::sample::serialize(eos::portable_oarchive &ar, const uint32_t archive_v
 void lsl::sample::serialize(eos::portable_iarchive &ar, const uint32_t archive_version) {
 	// read sample header
 	char tag;
-	ar &tag;
+	ar & tag;
 	if (tag == TAG_DEDUCED_TIMESTAMP) {
 		// deduce the timestamp
 		timestamp_ = DEDUCED_TIMESTAMP;
 	} else {
 		// read the time stamp
-		ar &timestamp_;
+		ar & timestamp_;
 	}
 	// read channel data
 	serialize_channels(ar, archive_version);
@@ -356,7 +356,8 @@ void lsl::sample::serialize(eos::portable_iarchive &ar, const uint32_t archive_v
 template <typename T> void test_pattern(T *data, uint32_t num_channels, int offset) {
 	for (std::size_t k = 0; k < num_channels; k++) {
 		std::size_t val = k + static_cast<std::size_t>(offset);
-		if (std::is_integral_v<T>) val %= static_cast<std::size_t>(std::numeric_limits<T>::max());
+		if (std::is_integral<T>::value)
+			val %= static_cast<std::size_t>(std::numeric_limits<T>::max());
 		data[k] = (k % 2 == 0) ? static_cast<T>(val) : -static_cast<T>(val);
 	}
 }

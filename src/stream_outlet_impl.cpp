@@ -83,8 +83,8 @@ void stream_outlet_impl::instantiate_stack(udp udp_protocol) {
 		try {
 			// use only addresses for the protocol that we're supposed to use here
 			if (udp_protocol == udp::v4() ? address.is_v4() : address.is_v6())
-				responders_.push_back(std::make_shared<udp_server>(
-					info_, *io_ctx_service_, address, multicast_port, multicast_ttl, listen_address));
+				responders_.push_back(std::make_shared<udp_server>(info_, *io_ctx_service_, address,
+					multicast_port, multicast_ttl, listen_address));
 		} catch (std::exception &e) {
 			LOG_F(WARNING, "Couldn't create multicast responder for %s (%s)",
 				address.to_string().c_str(), e.what());
@@ -120,7 +120,8 @@ stream_outlet_impl::~stream_outlet_impl() {
 				io_ctx_service_->stop();
 				for (std::size_t k = 0; k < io_threads_.size(); k++) {
 					if (!io_threads_[k]->joinable()) {
-						LOG_F(ERROR, "%s's io thread #%lu still running", name, k);
+						LOG_F(ERROR, "%s's io thread #%s still running", name,
+							std::to_string(k).c_str());
 					}
 				}
 				break;
