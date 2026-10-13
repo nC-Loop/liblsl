@@ -9,6 +9,8 @@ framework. Decision and measurements: loopit-framework
 ```bash
 make -C loopit armv7   # needs the Toradex SDK 5.7.2 under /opt/tdx-xwayland-rt/5.7.2
 make -C loopit i686    # needs a multilib host compiler (-m32)
+make -C loopit x86_64  # host 64-bit
+make -C loopit portable  # i686 + x86_64 in Ubuntu 22.04 (podman): the release's host builds
 ```
 
 `out/<target>/`: `liblsl.so` (stripped, with a debuglink), `liblsl.so.debug`,
