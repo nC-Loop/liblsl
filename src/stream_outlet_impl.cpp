@@ -98,6 +98,9 @@ stream_outlet_impl::~stream_outlet_impl() {
 		tcp_server_->end_serving();
 		for (auto &udp_server : udp_servers_) udp_server->end_serving();
 		for (auto &responder : responders_) responder->end_serving();
+		// transfer threads need the IO threads to finish their last write, so wait before stopping
+		if (!tcp_server_->wait_for_transfer_threads(2.0))
+			LOG_F(WARNING, "Transfer threads for %s did not exit in time", info().name().c_str());
 
 		// In theory, an io context should end quickly, but in practice it
 		// might take a while. So we
@@ -136,6 +139,12 @@ stream_outlet_impl::~stream_outlet_impl() {
 					[](const thread_p &thread) { return thread->joinable(); })) {
 				for (auto &thread : io_threads_) thread->join();
 				DLOG_F(INFO, "All of %s's IO threads were joined succesfully", name);
+				// stop() strands handlers (e.g. aborted async_accept) holding servers that own
+				// their io_context; run them or the outlet's resources leak (#312)
+				for (const auto &io : {io_ctx_data_, io_ctx_service_}) {
+					io->restart();
+					io->poll();
+				}
 				break;
 			}
 		}

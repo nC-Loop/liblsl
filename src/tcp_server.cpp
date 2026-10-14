@@ -65,13 +65,17 @@ class client_session : public std::enable_shared_from_this<client_session> {
 public:
 	/// Instantiate a new session & its socket.
 	client_session(const tcp_server_p &serv, tcp_socket &&sock)
-		: io_(serv->io_), serv_(serv), sock_(std::move(sock)), requeststream_(&requestbuf_) {}
+		: io_(serv->io_), factory_(serv->factory_), serv_(serv), sock_(std::move(sock)),
+		  requeststream_(&requestbuf_) {}
 
 	/// Destructor.
 	~client_session();
 
 	/// Get the socket of this session.
 	tcp_socket &socket() { return sock_; }
+
+	/// Ask the transfer thread to exit at its next wakeup.
+	void abort_transfer() { abort_transfer_.store(true, std::memory_order_release); }
 
 	/// Begin processing this session (i.e., data transmission over the socket).
 	void begin_processing();
@@ -104,8 +108,13 @@ private:
 	/// shared pointer to IO service; ensures that the IO is still around by the time the serv_ and
 	/// sock_ need to be destroyed
 	io_context_p io_;
+	/// keeps the sample factory alive while the transfer thread or a handler still holds queued
+	/// samples, which can outlive the server and the outlet (#312)
+	factory_p factory_;
 	/// the server that is associated with this connection
 	std::weak_ptr<tcp_server> serv_;
+	/// set by end_serving(): the transfer thread exits at its next wakeup (#312)
+	std::atomic<bool> abort_transfer_{false};
 	/// connection socket
 	tcp_socket sock_;
 
@@ -178,6 +187,11 @@ tcp_server::tcp_server(stream_info_impl_p info, io_context_p io, send_buffer_p s
 		throw std::runtime_error("Failed to instantiate socket acceptors for the TCP server");
 }
 
+bool tcp_server::wait_for_transfer_threads(double timeout) {
+	std::unique_lock<std::mutex> lock(transfer_mut_);
+	return transfer_cv_.wait_for(
+		lock, std::chrono::duration<double>(timeout), [this]() { return transfer_threads_ == 0; });
+}
 
 // === externally issued asynchronous commands ===
 
@@ -254,6 +268,7 @@ void tcp_server::close_inflight_sessions() {
 		auto session = pair.second.lock();
 		// session has already expired on its own
 		if (!session) continue;
+		session->abort_transfer();
 		post(session->socket().get_executor(), [session]() {
 			asio::error_code ec;
 			auto &sock = session->socket();
@@ -537,6 +552,8 @@ void client_session::handle_send_feedheader_outcome(err_t err, std::size_t n) {
 		// quit if max_buffered_ is 0. This is a bit unexpected, but backwards compatible and quite
 		// convenient for unit tests
 		if (max_buffered_ <= 0) return;
+		// teardown already began (handler ran during the outlet's final drain)
+		if (abort_transfer_.load(std::memory_order_acquire)) return;
 
 		// determine transfer parameters
 		auto queue = serv->send_buffer_->new_consumer(max_buffered_);
@@ -549,6 +566,10 @@ void client_session::handle_send_feedheader_outcome(err_t err, std::size_t n) {
 			max_samples_per_chunk = serv->chunk_size_;
 
 		// spawn a sample transfer thread.
+		{
+			std::lock_guard<std::mutex> lock(serv->transfer_mut_);
+			serv->transfer_threads_++;
+		}
 		std::thread(&client_session::transfer_samples_thread, this, shared_from_this(),
 			std::move(queue), max_samples_per_chunk)
 			.detach();
@@ -560,10 +581,12 @@ void client_session::handle_send_feedheader_outcome(err_t err, std::size_t n) {
 void client_session::transfer_samples_thread(std::shared_ptr<client_session> /* keepalive */,
 	std::shared_ptr<consumer_queue> &&queue, int max_samples_per_chunk) {
 	int samples_in_current_chunk = 0;
-	while (!serv_.expired()) {
+	while (!serv_.expired() && !abort_transfer_.load(std::memory_order_acquire)) {
 		try {
 			// get next sample from the sample queue (blocking)
 			sample_p samp(queue->pop_sample());
+			// end_serving() flagged this session before waking it with a blank sample
+			if (abort_transfer_.load(std::memory_order_acquire)) break;
 
 			// ignore blank samples (they are basically wakeup notifiers from someone's
 			// end_serving())
@@ -595,6 +618,11 @@ void client_session::transfer_samples_thread(std::shared_ptr<client_session> /* 
 		} catch (std::exception &e) {
 			LOG_F(WARNING, "Unexpected glitch in transfer_samples_thread: %s", e.what());
 		}
+	}
+	// let the outlet's teardown (wait_for_transfer_threads) know this thread is done
+	if (auto serv = serv_.lock()) {
+		std::lock_guard<std::mutex> lock(serv->transfer_mut_);
+		if (--serv->transfer_threads_ == 0) serv->transfer_cv_.notify_all();
 	}
 }
 
